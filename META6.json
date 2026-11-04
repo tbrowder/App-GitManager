@@ -1,0 +1,26 @@
+{
+  "api": 0,
+  "auth": "zef:tbrowder",
+  "authors": [
+    "Tom Browder"
+  ],
+  "build-depends": [
+  ],
+  "depends": [
+  ],
+  "description": "Provides routines to ease managing a GitHub repository\n",
+  "license": "Artistic-2.0",
+  "name": "App::GitManager",
+  "perl": "6.d",
+  "provides": {
+    "App::GitManager": "lib/App/GitManager.rakumod"
+  },
+  "resources": [
+  ],
+  "source-url": "",
+  "tags": [
+  ],
+  "test-depends": [
+  ],
+  "version": "0.0.1"
+}
