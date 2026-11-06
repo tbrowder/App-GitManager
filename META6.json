@@ -1,27 +1,32 @@
 {
-  "api": 0,
+  "api": "1",
   "auth": "zef:tbrowder",
-  "authors": [
-    "Tom Browder"
+  "bin": [
+    "bin/gitmanager"
   ],
   "build-depends": [
   ],
   "depends": [
+    "JSON::Fast"
   ],
-  "description": "Provides routines to ease managing a GitHub repository",
+  "description": "Safe, read-only Git repository status inspection (Phase 1)",
   "license": "Artistic-2.0",
   "name": "App::GitManager",
   "perl": "6.d",
   "provides": {
-    "App::GitManager": "lib/App/GitManager.rakumod"
+    "App::GitManager": "lib/App/GitManager.rakumod",
+    "App::GitManager::CLI": "lib/App/GitManager/CLI.rakumod",
+    "App::GitManager::Git": "lib/App/GitManager/Git.rakumod",
+    "App::GitManager::Result": "lib/App/GitManager/Result.rakumod",
+    "App::GitManager::Status": "lib/App/GitManager/Status.rakumod"
   },
   "resources": [
   ],
   "source-url": "",
   "tags": [
-    "git manage"
   ],
   "test-depends": [
+    "Test"
   ],
-  "version": "0.0.1"
+  "version": "0.1.0"
 }

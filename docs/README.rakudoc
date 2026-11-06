@@ -1,30 +1,51 @@
 =begin pod
 
-=head1 NAME
-
-B<App::GitManager> - Provides routines to ease managing a GitHub repository
-
+=TITLE App::GitManager
 
 =head1 SYNOPSIS
 
-=begin code :lang<raku>
-
-use App::GitManager;
-
-=end code
+    gitmanager status
+    gitmanager status --repo=/path/to/repo
+    gitmanager status --all --repo=/path/to/parent
+    gitmanager status --json
+    gitmanager status --verbose
 
 =head1 DESCRIPTION
 
-B<App::GitManager> is ...
+Phase 1 of App::GitManager implements read-only inspection of one Git
+working tree. With C<--all>, it examines immediate subdirectories of
+C<--repo> that contain a C<.git> entry (including linked worktrees).
+It does not recursively descend into nested projects.
 
-=head1 AUTHOR
+No network requests, fetches, pulls, pushes, staging, commits, resets,
+branch deletion, or changes to tracked files occur.
 
-Tom Browder <tbrowder@acm.org>
+Git's C<--no-optional-locks> option is used to prevent optional index
+refresh writes during status inspection.
 
-=head1 COPYRIGHT AND LICENSE
+Ahead and behind counts compare HEAD to the cached upstream tracking
+reference. They do not establish whether the GitHub server has newer
+commits. An absent upstream produces unknown counts.
 
-© 2026 Tom Browder
+=head1 OPTIONS
 
-This library is free software; you may redistribute it or modify it under the Artistic License 2.0.
+=item C<--repo=PATH>       Repository path or parent directory for C<--all>.
+=item C<--all>             Examine immediate repositories below the parent.
+=item C<--remote=NAME>     Remote whose URL is displayed; default C<origin>.
+=item C<--json>            Machine-readable status report.
+=item C<--verbose>         Include branch lists.
+=item C<--dry-run>         Accepted; this command is already read-only.
+=item C<--yes>             Accepted; no confirmations needed for status.
+=item C<--no-interactive>  Accepted; status never prompts.
+
+=head1 EXIT CODES
+
+0 for success, 1 when repositories cannot be inspected or none are found,
+2 for unsupported options, commands, or invalid arguments.
+
+=head1 ROADMAP
+
+Future phases: sync, pr, prune-branches, and release. These commands
+are intentionally NOT implemented in Phase 1.
 
 =end pod
