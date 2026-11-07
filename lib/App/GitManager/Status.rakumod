@@ -146,7 +146,7 @@ sub inspect-repo(Str:D $path, Str :$remote = 'origin' --> Hash) is export {
 # --all intentionally scans only immediate subdirectories. A Git worktree
 # uses a .git file instead of a directory; .e checks for either form.
 sub repository-paths(Str:D $parent --> Array) is export {
-    my $directory = $parent.IO.absolute;
+    my $directory = $parent.IO.absolute.IO;
     die "Directory not found: $parent" unless $directory.d;
 
     my @paths;
