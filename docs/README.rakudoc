@@ -5,47 +5,76 @@
 =head1 SYNOPSIS
 
     gitmanager status
-    gitmanager status --repo=/path/to/repo
     gitmanager status --all --repo=/path/to/parent
     gitmanager status --json
-    gitmanager status --verbose
+    gitmanager sync --repo=/path/to/repo --dry-run
+    gitmanager sync --repo=/path/to/repo
+    gitmanager sync --repo=/path/to/repo --yes
+    gitmanager sync --repo=/path/to/repo --push --yes
 
 =head1 DESCRIPTION
 
-Phase 1 of App::GitManager implements read-only inspection of one Git
-working tree. With C<--all>, it examines immediate subdirectories of
-C<--repo> that contain a C<.git> entry (including linked worktrees).
-It does not recursively descend into nested projects.
+C<App::GitManager> inspects repositories and cautiously synchronizes one
+checked-out branch at a time with its configured upstream remote.
 
-No network requests, fetches, pulls, pushes, staging, commits, resets,
-branch deletion, or changes to tracked files occur.
+=head1 STATUS
 
-Git's C<--no-optional-locks> option is used to prevent optional index
-refresh writes during status inspection.
+C<status> reads the working tree, branch information, and locally cached
+remote-tracking references. With C<--all>, it examines immediate subdirectories
+of C<--repo> that contain a C<.git> entry (including linked worktrees).
 
-Ahead and behind counts compare HEAD to the cached upstream tracking
-reference. They do not establish whether the GitHub server has newer
-commits. An absent upstream produces unknown counts.
+It does not fetch or contact GitHub. Ahead/behind counts for C<status> are
+based on the last locally fetched remote-tracking references.
+
+=head1 SYNC (PHASE 2)
+
+C<sync> is intentionally restricted to a single repository; C<--all> is not
+permitted. It requires a clean working tree, an attached branch, and a
+configured upstream belonging to the selected remote (default C<origin>).
+
+After confirmation, C<sync> fetches with C<--no-tags>, reevaluates the branch,
+and performs C<git merge --ff-only> only when the upstream is ahead and no
+local commits diverge. It never silently merges, rebases, resets, deletes
+branches, or force-pushes.
+
+Local commits are never pushed by default. C<--push> explicitly opts into a
+normal, non-force push to the configured upstream branch. If the remote has
+advanced incompatibly, Git rejects the push. Pushing is performed only after
+another state check.
+
+C<--dry-run> previews planned operations using cached refs without fetching,
+pushing, or modifying the repository. It cannot know remote changes that have
+not yet been fetched. C<--dry-run> does not require C<--yes>.
+
+When C<--yes> is omitted, C<sync> prompts interactively. C<--no-interactive>
+refuses to prompt and requires C<--yes> for an actual sync. Nonterminal input
+also requires C<--yes>.
 
 =head1 OPTIONS
 
-=item C<--repo=PATH>       Repository path or parent directory for C<--all>.
-=item C<--all>             Examine immediate repositories below the parent.
-=item C<--remote=NAME>     Remote whose URL is displayed; default C<origin>.
-=item C<--json>            Machine-readable status report.
-=item C<--verbose>         Include branch lists.
-=item C<--dry-run>         Accepted; this command is already read-only.
-=item C<--yes>             Accepted; no confirmations needed for status.
-=item C<--no-interactive>  Accepted; status never prompts.
+=item C<--repo=PATH>       Repository path (or parent for status --all).
+=item C<--all>             Inspect immediate child repositories (status only).
+=item C<--remote=NAME>     Selected remote, default C<origin>.
+=item C<--json>            Machine-readable report.
+=item C<--verbose>         Include branch lists in status.
+=item C<--dry-run>         Preview sync without network or mutations.
+=item C<--yes>             Authorize safe sync actions without confirmation.
+=item C<--no-interactive>  Fail rather than prompt for confirmation.
+=item C<--push>            Additionally push local commits (sync only).
+=item C<--help>            Show usage information.
 
 =head1 EXIT CODES
 
-0 for success, 1 when repositories cannot be inspected or none are found,
-2 for unsupported options, commands, or invalid arguments.
+0 on success, 1 on a Git error, refusal, or cancellation; 2 on invalid
+options or absent noninteractive authorization.
+
+=head1 DEVELOPMENT
+
+Run C<zef test .> for unit tests and C<mi6 test> to include integration tests
+in C<xt/>. Integration tests use local temporary Git repositories only.
 
 =head1 ROADMAP
 
-Future phases: sync, pr, prune-branches, and release. These commands
-are intentionally NOT implemented in Phase 1.
+Future phases: C<pr>, C<prune-branches>, and C<release>.
 
 =end pod

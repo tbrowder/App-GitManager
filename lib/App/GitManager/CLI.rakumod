@@ -2,22 +2,25 @@ unit module App::GitManager::CLI;
 
 use JSON::Fast;
 use App::GitManager::Status;
+use App::GitManager::Sync;
 
 my constant $USAGE = q:to/HELP/;
 Usage: gitmanager status [options]
+       gitmanager sync [options]
        gitmanager --help
 
-Read-only status of one local Git repository (no network access).
+Status is read-only. Sync fetches and safely fast-forwards one branch.
 
 Options:
   --repo=PATH          Repository path (default: current directory)
-  --all                Inspect immediate Git subdirectories of --repo
+  --all                Inspect child repos (status only)
   --remote=NAME        Remote to display (default: origin)
   --json               Emit structured JSON instead of text
   --verbose            Show local and remote-tracking branch names
-  --dry-run            Accepted; status is already read-only
-  --yes                Accepted; status never prompts
-  --no-interactive     Accepted; status never prompts
+  --dry-run            Preview sync without network or repository writes
+  --yes                Confirm validated sync operations automatically
+  --no-interactive     Do not prompt (sync requires --yes or --dry-run)
+  --push               Also push local commits (sync only; never force)
   --help               Show this help
 
 Examples:
@@ -25,6 +28,9 @@ Examples:
   gitmanager status --repo=/path/to/Text-Utils
   gitmanager status --all --repo=/path/to/my-public-modules
   gitmanager status --all --json
+  gitmanager sync --repo=/path/to/Text-Utils --dry-run
+  gitmanager sync --repo=/path/to/Text-Utils --yes
+  gitmanager sync --repo=/path/to/Text-Utils --push --yes
 HELP
 
 sub print-report(%report, Bool :$verbose = False --> Nil) {
@@ -70,6 +76,10 @@ sub run-cli(@arguments --> Int) is export {
     my $json = False;
     my $verbose = False;
     my $help = False;
+    my $dry-run = False;
+    my $yes = False;
+    my $no-interactive = False;
+    my $push = False;
 
     while @args {
         my $option = @args.shift;
@@ -78,9 +88,10 @@ sub run-cli(@arguments --> Int) is export {
             when '--all'            { $all = True }
             when '--json'           { $json = True }
             when '--verbose'        { $verbose = True }
-            when '--dry-run'        { }
-            when '--yes'            { }
-            when '--no-interactive' { }
+            when '--dry-run'        { $dry-run = True }
+            when '--yes'            { $yes = True }
+            when '--no-interactive' { $no-interactive = True }
+            when '--push'           { $push = True }
             when '--repo' {
                 unless @args {
                     note 'Missing value for --repo';
@@ -114,13 +125,97 @@ sub run-cli(@arguments --> Int) is export {
         print $USAGE;
         return 0;
     }
-    if $command ne 'status' {
-        note "Command not implemented in Phase 1: $command";
+    unless $command eq 'status' or $command eq 'sync' {
+        note "Command not implemented: $command";
         return 2;
     }
-    if not $repo.chars or not $remote.chars {
+    if not $repo.chars or not $remote.chars or $remote.starts-with('-') {
         note 'Repository and remote must be nonempty';
         return 2;
+    }
+
+    if $command eq 'status' and $push {
+        note '--push is valid only for sync';
+        return 2;
+    }
+    if $command eq 'sync' {
+        if $all {
+            note '--all is not supported for sync; select one repository';
+            return 2;
+        }
+        my %plan;
+        try {
+            %plan = sync-preflight($repo, :$remote);
+            CATCH {
+                default {
+                    note "Sync refused: {.message}";
+                    return 1;
+                }
+            }
+        }
+        if $dry-run {
+            my %preview;
+            try {
+                %preview = sync-repo($repo, :$remote, :$dry-run, :$push);
+                CATCH {
+                    default {
+                        note "Sync preview failed: {.message}";
+                        return 1;
+                    }
+                }
+            }
+            if $json {
+                say to-json(%preview);
+            }
+            else {
+                say "Dry run: {%preview<path>} ({%preview<branch>})";
+                say "Upstream: {%preview<upstream>}";
+                say 'Cached ahead/behind: '
+                    ~ "{%preview<ahead> // 'unknown'}/"
+                    ~ "{%preview<behind> // 'unknown'}";
+                say 'Would fetch from remote, fast-forward if possible, '
+                    ~ ($push ?? 'then push if ahead.' !! 'without pushing.');
+                say 'No network requests or changes made.';
+            }
+            return 0;
+        }
+        unless $yes {
+            if $no-interactive or not $*IN.t {
+                note 'Sync requires confirmation; pass --yes for automation';
+                return 2;
+            }
+            say "Repository: {%plan<path>}";
+            say "Branch: {%plan<branch>}  Upstream: {%plan<upstream>}";
+            say 'Action: fetch, fast-forward if possible'
+                ~ ($push ?? ', and push local commits' !! ' (no push)');
+            print 'Proceed? [y/N] ';
+            my $answer = $*IN.get;
+            unless $answer.defined and $answer.lc.trim eq 'y' {
+                note 'Sync cancelled';
+                return 1;
+            }
+        }
+        my %result;
+        try {
+            %result = sync-repo($repo, :$remote, :$push);
+            CATCH {
+                default {
+                    note "Sync failed: {.message}";
+                    return 1;
+                }
+            }
+        }
+        if $json {
+            say to-json(%result);
+        }
+        else {
+            say %result<message>;
+            say "Branch: {%result<branch>}";
+            say "Ahead: {%result<ahead>}  Behind: {%result<behind>}";
+            say "Fast-forward: {%result<fast-forward-performed> ?? 'yes' !! 'no'}";
+            say "Push: {%result<push-performed> ?? 'yes' !! 'no'}";
+        }
+        return 0;
     }
 
     my @paths;

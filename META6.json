@@ -1,5 +1,5 @@
 {
-  "api": "1",
+  "api": "0",
   "auth": "zef:tbrowder",
   "bin": [
     "bin/gitmanager"
@@ -9,7 +9,7 @@
   "depends": [
     "JSON::Fast"
   ],
-  "description": "Safe, read-only Git repository status inspection (Phase 1)",
+  "description": "Safe Git repository inspection and guarded fetch/fast-forward synchronization",
   "license": "Artistic-2.0",
   "name": "App::GitManager",
   "perl": "6.d",
@@ -18,15 +18,16 @@
     "App::GitManager::CLI": "lib/App/GitManager/CLI.rakumod",
     "App::GitManager::Git": "lib/App/GitManager/Git.rakumod",
     "App::GitManager::Result": "lib/App/GitManager/Result.rakumod",
-    "App::GitManager::Status": "lib/App/GitManager/Status.rakumod"
+    "App::GitManager::Status": "lib/App/GitManager/Status.rakumod",
+    "App::GitManager::Sync": "lib/App/GitManager/Sync.rakumod"
   },
   "resources": [
   ],
   "source-url": "https://github.com/tbrowder/App-GitManager.git",
   "tags": [
+    "git aid"
   ],
   "test-depends": [
-    "Test"
   ],
-  "version": "0.1.0"
+  "version": "0.0.1"
 }

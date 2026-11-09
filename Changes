@@ -1,3 +1,3 @@
-0.1.0  2026-11-04
-  - Initial read-only status command for one repository or --all.
-  - Cached upstream ahead/behind, JSON report, safety-first Git invocation.
+{{$NEXT}}
+
+    - Initial release

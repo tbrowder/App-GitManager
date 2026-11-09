@@ -7,48 +7,73 @@ SYNOPSIS
 ========
 
     gitmanager status
-    gitmanager status --repo=/path/to/repo
     gitmanager status --all --repo=/path/to/parent
     gitmanager status --json
-    gitmanager status --verbose
+    gitmanager sync --repo=/path/to/repo --dry-run
+    gitmanager sync --repo=/path/to/repo
+    gitmanager sync --repo=/path/to/repo --yes
+    gitmanager sync --repo=/path/to/repo --push --yes
 
 DESCRIPTION
 ===========
 
-Phase 1 of App::GitManager implements read-only inspection of one Git working tree. With `--all`, it examines immediate subdirectories of `--repo` that contain a `.git` entry (including linked worktrees). It does not recursively descend into nested projects.
+`App::GitManager` inspects repositories and cautiously synchronizes one checked-out branch at a time with its configured upstream remote.
 
-No network requests, fetches, pulls, pushes, staging, commits, resets, branch deletion, or changes to tracked files occur.
+STATUS
+======
 
-Git's `--no-optional-locks` option is used to prevent optional index refresh writes during status inspection.
+`status` reads the working tree, branch information, and locally cached remote-tracking references. With `--all`, it examines immediate subdirectories of `--repo` that contain a `.git` entry (including linked worktrees).
 
-Ahead and behind counts compare HEAD to the cached upstream tracking reference. They do not establish whether the GitHub server has newer commits. An absent upstream produces unknown counts.
+It does not fetch or contact GitHub. Ahead/behind counts for `status` are based on the last locally fetched remote-tracking references.
+
+SYNC (PHASE 2)
+==============
+
+`sync` is intentionally restricted to a single repository; `--all` is not permitted. It requires a clean working tree, an attached branch, and a configured upstream belonging to the selected remote (default `origin`).
+
+After confirmation, `sync` fetches with `--no-tags`, reevaluates the branch, and performs `git merge --ff-only` only when the upstream is ahead and no local commits diverge. It never silently merges, rebases, resets, deletes branches, or force-pushes.
+
+Local commits are never pushed by default. `--push` explicitly opts into a normal, non-force push to the configured upstream branch. If the remote has advanced incompatibly, Git rejects the push. Pushing is performed only after another state check.
+
+`--dry-run` previews planned operations using cached refs without fetching, pushing, or modifying the repository. It cannot know remote changes that have not yet been fetched. `--dry-run` does not require `--yes`.
+
+When `--yes` is omitted, `sync` prompts interactively. `--no-interactive` refuses to prompt and requires `--yes` for an actual sync. Nonterminal input also requires `--yes`.
 
 OPTIONS
 =======
 
-  * `--repo=PATH` Repository path or parent directory for `--all`.
+  * `--repo=PATH` Repository path (or parent for status --all).
 
-  * `--all` Examine immediate repositories below the parent.
+  * `--all` Inspect immediate child repositories (status only).
 
-  * `--remote=NAME` Remote whose URL is displayed; default `origin`.
+  * `--remote=NAME` Selected remote, default `origin`.
 
-  * `--json` Machine-readable status report.
+  * `--json` Machine-readable report.
 
-  * `--verbose` Include branch lists.
+  * `--verbose` Include branch lists in status.
 
-  * `--dry-run` Accepted; this command is already read-only.
+  * `--dry-run` Preview sync without network or mutations.
 
-  * `--yes` Accepted; no confirmations needed for status.
+  * `--yes` Authorize safe sync actions without confirmation.
 
-  * `--no-interactive` Accepted; status never prompts.
+  * `--no-interactive` Fail rather than prompt for confirmation.
+
+  * `--push` Additionally push local commits (sync only).
+
+  * `--help` Show usage information.
 
 EXIT CODES
 ==========
 
-0 for success, 1 when repositories cannot be inspected or none are found, 2 for unsupported options, commands, or invalid arguments.
+0 on success, 1 on a Git error, refusal, or cancellation; 2 on invalid options or absent noninteractive authorization.
+
+DEVELOPMENT
+===========
+
+Run `zef test .` for unit tests and `mi6 test` to include integration tests in `xt/`. Integration tests use local temporary Git repositories only.
 
 ROADMAP
 =======
 
-Future phases: sync, pr, prune-branches, and release. These commands are intentionally NOT implemented in Phase 1.
+Future phases: `pr`, `prune-branches`, and `release`.
 
