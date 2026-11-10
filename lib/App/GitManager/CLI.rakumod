@@ -4,11 +4,13 @@ use JSON::Fast;
 use App::GitManager::Status;
 use App::GitManager::Sync;
 use App::GitManager::Alias;
+use App::GitManager::PR;
 
 my constant $USAGE = q:to/HELP/;
 Usage: gitmanager status [options]
        gitmanager sync [options]
        gitmanager alias <add|list|show|remove> [arguments] [options]
+       gitmanager pr <list|view|create|merge> [number] [options]
        gitmanager --help
 
 Status is read-only. Sync fetches and safely fast-forwards one branch.
@@ -23,6 +25,10 @@ Options:
   --yes                Confirm validated sync operations automatically
   --no-interactive     Do not prompt (sync requires --yes or --dry-run)
   --push               Also push local commits (sync only; never force)
+  --title=TEXT         PR title (create only)
+  --body=TEXT          PR body (create only; default empty)
+  --base=BRANCH        Target branch (required for create)
+  --merge-method=NAME  Merge method: merge, squash, rebase
   --help               Show this help
 
 Examples:
@@ -36,6 +42,10 @@ Examples:
   gitmanager alias add tu /path/to/Text-Utils
   gitmanager status -r tu
   gitmanager alias list
+  gitmanager pr list -r tu
+  gitmanager pr view 12 -r tu
+  gitmanager pr create -r tu --base=master --title="Fix bug"
+  gitmanager pr merge 12 -r tu --dry-run
 HELP
 
 sub print-report(%report, Bool :$verbose = False --> Nil) {
@@ -85,6 +95,10 @@ sub run-cli(@arguments --> Int) is export {
     my $yes = False;
     my $no-interactive = False;
     my $push = False;
+    my $title = '';
+    my $body = '';
+    my $base = '';
+    my $merge-method = 'merge';
     my @positionals;
 
     while @args {
@@ -112,6 +126,19 @@ sub run-cli(@arguments --> Int) is export {
                 }
                 $repo = @args.shift;
             }
+            when '--title' | '--body' | '--base' | '--merge-method' {
+                unless @args {
+                    note "Missing value for $option";
+                    return 2;
+                }
+                my $value = @args.shift;
+                given $option {
+                    when '--title' { $title = $value }
+                    when '--body' { $body = $value }
+                    when '--base' { $base = $value }
+                    when '--merge-method' { $merge-method = $value }
+                }
+            }
             when '--remote' {
                 unless @args {
                     note 'Missing value for --remote';
@@ -122,6 +149,18 @@ sub run-cli(@arguments --> Int) is export {
             default {
                 if $option.starts-with('--repo=') {
                     $repo = $option.substr(7);
+                }
+                elsif $option.starts-with('--title=') {
+                    $title = $option.substr(8);
+                }
+                elsif $option.starts-with('--body=') {
+                    $body = $option.substr(7);
+                }
+                elsif $option.starts-with('--base=') {
+                    $base = $option.substr(7);
+                }
+                elsif $option.starts-with('--merge-method=') {
+                    $merge-method = $option.substr(15);
                 }
                 elsif $option.starts-with('--remote=') {
                     $remote = $option.substr(9);
@@ -205,6 +244,101 @@ sub run-cli(@arguments --> Int) is export {
         else {
             say "$action: {%result<name>} => {%result<path>}"
                 ~ ((%result<dry-run> // False) ?? ' (dry run)' !! '');
+        }
+        return 0;
+    }
+    if $command eq 'pr' {
+        if $all or $push {
+            note '--all and --push are not supported for pr';
+            return 2;
+        }
+        my $action = @positionals.elems ?? @positionals.shift !! '';
+        unless $action eq 'list' or $action eq 'view' or
+                $action eq 'create' or $action eq 'merge' {
+            note 'Usage: gitmanager pr <list|view|create|merge> ...';
+            return 2;
+        }
+        my $expects-number = ($action eq 'view' or $action eq 'merge');
+        if @positionals.elems != ($expects-number ?? 1 !! 0) {
+            note 'Invalid PR number or extra positional arguments';
+            return 2;
+        }
+        my $number = $expects-number ?? @positionals[0] !! '';
+        if $no-interactive and not $yes and not $dry-run and
+                ($action eq 'create' or $action eq 'merge') {
+            note 'PR modification requires --yes in noninteractive mode';
+            return 2;
+        }
+        if $action eq 'list' or $action eq 'view' {
+            if $title.chars or $body.chars or $base.chars or
+                    $merge-method ne 'merge' {
+                note 'PR creation and merge options are invalid here';
+                return 2;
+            }
+        }
+        if $action eq 'create' and $merge-method ne 'merge' {
+            note '--merge-method is valid only for pr merge';
+            return 2;
+        }
+        if $action eq 'merge' and ($title.chars or $body.chars or $base.chars) {
+            note '--title, --body, --base are valid only for pr create';
+            return 2;
+        }
+        my %preview;
+        try {
+            $repo = resolve-repo($repo);
+            %preview = pr-action($repo, $action, :$remote, :$number,
+                :$title, :$body, :$base, :$merge-method, :dry-run);
+            CATCH {
+                default {
+                    note "PR refused: {.message}";
+                    return 1;
+                }
+            }
+        }
+        my $mutating = ($action eq 'create' or $action eq 'merge');
+        if $mutating and not $dry-run and not $yes {
+            unless $*IN.t {
+                note 'PR modification requires confirmation or --yes';
+                return 2;
+            }
+            say "Repository: {%preview<repository>}";
+            say "Action: $action";
+            say "PR number: $number" if $action eq 'merge';
+            say "Title: $title  Base: $base" if $action eq 'create';
+            print 'Proceed? [y/N] ';
+            my $answer = $*IN.get;
+            unless $answer.defined and $answer.lc.trim eq 'y' {
+                note 'PR operation cancelled';
+                return 1;
+            }
+        }
+        my %result = %preview;
+        unless $dry-run {
+            try {
+                %result = pr-action($repo, $action, :$remote, :$number,
+                    :$title, :$body, :$base, :$merge-method);
+                CATCH {
+                    default {
+                        note "PR failed: {.message}";
+                        return 1;
+                    }
+                }
+            }
+        }
+        if $json {
+            say to-json(%result);
+        }
+        elsif $dry-run {
+            say "PR $action preview: {%result<repository>}";
+            say 'Command arguments: ' ~ %result<arguments>.join(' ');
+            say %result<message>;
+        }
+        elsif $action eq 'list' or $action eq 'view' {
+            say to-json(%result<data>);
+        }
+        else {
+            say "PR $action: {%result<message>}";
         }
         return 0;
     }

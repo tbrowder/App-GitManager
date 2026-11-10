@@ -18,6 +18,7 @@
     "App::GitManager::Alias": "lib/App/GitManager/Alias.rakumod",
     "App::GitManager::CLI": "lib/App/GitManager/CLI.rakumod",
     "App::GitManager::Git": "lib/App/GitManager/Git.rakumod",
+    "App::GitManager::PR": "lib/App/GitManager/PR.rakumod",
     "App::GitManager::Result": "lib/App/GitManager/Result.rakumod",
     "App::GitManager::Status": "lib/App/GitManager/Status.rakumod",
     "App::GitManager::Sync": "lib/App/GitManager/Sync.rakumod"

@@ -2,12 +2,13 @@ use Test;
 
 my @modules = <
     App::GitManager
-    App::GitManager::Result
-    App::GitManager::Git
-    App::GitManager::Status
-    App::GitManager::CLI
-    App::GitManager::Sync
     App::GitManager::Alias
+    App::GitManager::CLI
+    App::GitManager::Git
+    App::GitManager::PR
+    App::GitManager::Result
+    App::GitManager::Status
+    App::GitManager::Sync
 >;
 
 plan @modules.elems;
