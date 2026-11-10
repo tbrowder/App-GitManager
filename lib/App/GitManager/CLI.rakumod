@@ -3,16 +3,18 @@ unit module App::GitManager::CLI;
 use JSON::Fast;
 use App::GitManager::Status;
 use App::GitManager::Sync;
+use App::GitManager::Alias;
 
 my constant $USAGE = q:to/HELP/;
 Usage: gitmanager status [options]
        gitmanager sync [options]
+       gitmanager alias <add|list|show|remove> [arguments] [options]
        gitmanager --help
 
 Status is read-only. Sync fetches and safely fast-forwards one branch.
 
 Options:
-  --repo=PATH          Repository path (default: current directory)
+  --repo=PATH, -r PATH Repository path or saved alias (default: .)
   --all                Inspect child repos (status only)
   --remote=NAME        Remote to display (default: origin)
   --json               Emit structured JSON instead of text
@@ -31,6 +33,9 @@ Examples:
   gitmanager sync --repo=/path/to/Text-Utils --dry-run
   gitmanager sync --repo=/path/to/Text-Utils --yes
   gitmanager sync --repo=/path/to/Text-Utils --push --yes
+  gitmanager alias add tu /path/to/Text-Utils
+  gitmanager status -r tu
+  gitmanager alias list
 HELP
 
 sub print-report(%report, Bool :$verbose = False --> Nil) {
@@ -66,7 +71,7 @@ sub print-report(%report, Bool :$verbose = False --> Nil) {
 sub run-cli(@arguments --> Int) is export {
     my @args = @arguments;
     my $command = 'status';
-    if @args and not @args[0].starts-with('--') {
+    if @args and not @args[0].starts-with('-') {
         $command = @args.shift;
     }
 
@@ -80,6 +85,7 @@ sub run-cli(@arguments --> Int) is export {
     my $yes = False;
     my $no-interactive = False;
     my $push = False;
+    my @positionals;
 
     while @args {
         my $option = @args.shift;
@@ -92,6 +98,13 @@ sub run-cli(@arguments --> Int) is export {
             when '--yes'            { $yes = True }
             when '--no-interactive' { $no-interactive = True }
             when '--push'           { $push = True }
+            when '-r' {
+                unless @args {
+                    note 'Missing value for -r';
+                    return 2;
+                }
+                $repo = @args.shift;
+            }
             when '--repo' {
                 unless @args {
                     note 'Missing value for --repo';
@@ -113,9 +126,12 @@ sub run-cli(@arguments --> Int) is export {
                 elsif $option.starts-with('--remote=') {
                     $remote = $option.substr(9);
                 }
-                else {
+                elsif $option.starts-with('-') {
                     note "Unknown option: $option";
                     return 2;
+                }
+                else {
+                    @positionals.push($option);
                 }
             }
         }
@@ -125,6 +141,77 @@ sub run-cli(@arguments --> Int) is export {
         print $USAGE;
         return 0;
     }
+    if $command eq 'alias' {
+        if @positionals.elems == 0 {
+            note 'Usage: gitmanager alias <add|list|show|remove> ...';
+            return 2;
+        }
+        my $action = @positionals.shift;
+        my $expected = $action eq 'add' ?? 2
+            !! ($action eq 'list' ?? 0
+            !! ($action eq 'show' or $action eq 'remove' ?? 1 !! -1));
+        if $expected < 0 or @positionals.elems != $expected {
+            note "Invalid alias action or arguments: $action";
+            return 2;
+        }
+        if $all or $push or $remote ne 'origin' or $repo ne '.' {
+            note 'Repository, remote, --all, and --push are not alias options';
+            return 2;
+        }
+        my %result;
+        try {
+            given $action {
+                when 'list' {
+                    my %aliases = read-aliases();
+                    %result = { action => 'list', aliases => %aliases };
+                }
+                when 'show' {
+                    my %aliases = read-aliases();
+                    die "Unknown alias: {@positionals[0]}"
+                        unless %aliases{@positionals[0]}:exists;
+                    %result = { action => 'show',
+                        name => @positionals[0],
+                        path => %aliases{@positionals[0]} };
+                }
+                default {
+                    unless $dry-run or $yes {
+                        die 'Confirmation required; pass --yes in automation'
+                            if $no-interactive or not $*IN.t;
+                        print "Alias $action {@positionals[0]}? [y/N] ";
+                        my $answer = $*IN.get;
+                        die 'Cancelled' unless $answer.defined
+                            and $answer.lc.trim eq 'y';
+                    }
+                    %result = $action eq 'add'
+                        ?? add-alias(@positionals[0], @positionals[1], :$dry-run)
+                        !! remove-alias(@positionals[0], :$dry-run);
+                }
+            }
+            CATCH {
+                default {
+                    note "Alias error: {.message}";
+                    return 1;
+                }
+            }
+        }
+        if $json {
+            say to-json(%result);
+        }
+        elsif $action eq 'list' {
+            for %result<aliases>.keys.sort -> $name {
+                say "$name  {%result<aliases>{$name}}";
+            }
+        }
+        else {
+            say "$action: {%result<name>} => {%result<path>}"
+                ~ ((%result<dry-run> // False) ?? ' (dry run)' !! '');
+        }
+        return 0;
+    }
+    if @positionals {
+        note "Unexpected arguments: {@positionals.join(' ')}";
+        return 2;
+    }
     unless $command eq 'status' or $command eq 'sync' {
         note "Command not implemented: $command";
         return 2;
@@ -132,6 +219,16 @@ sub run-cli(@arguments --> Int) is export {
     if not $repo.chars or not $remote.chars or $remote.starts-with('-') {
         note 'Repository and remote must be nonempty';
         return 2;
+    }
+
+    try {
+        $repo = resolve-repo($repo);
+        CATCH {
+            default {
+                note .message;
+                return 2;
+            }
+        }
     }
 
     if $command eq 'status' and $push {

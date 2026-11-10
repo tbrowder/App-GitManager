@@ -7,6 +7,7 @@ my @modules = <
     App::GitManager::Status
     App::GitManager::CLI
     App::GitManager::Sync
+    App::GitManager::Alias
 >;
 
 plan @modules.elems;
