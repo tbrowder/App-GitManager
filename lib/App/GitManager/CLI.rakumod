@@ -5,12 +5,16 @@ use App::GitManager::Status;
 use App::GitManager::Sync;
 use App::GitManager::Alias;
 use App::GitManager::PR;
+use App::GitManager::PruneBranches;
+use App::GitManager::Release;
 
 my constant $USAGE = q:to/HELP/;
 Usage: gitmanager status [options]
        gitmanager sync [options]
        gitmanager alias <add|list|show|remove> [arguments] [options]
        gitmanager pr <list|view|create|merge> [number] [options]
+       gitmanager prune-branches [--base=BRANCH] [--delete] [options]
+       gitmanager release <check|tag|push-tag|github> [options]
        gitmanager --help
 
 Status is read-only. Sync fetches and safely fast-forwards one branch.
@@ -27,8 +31,9 @@ Options:
   --push               Also push local commits (sync only; never force)
   --title=TEXT         PR title (create only)
   --body=TEXT          PR body (create only; default empty)
-  --base=BRANCH        Target branch (required for create)
+  --base=BRANCH        PR target or prune merge base
   --merge-method=NAME  Merge method: merge, squash, rebase
+  --delete             Delete eligible local branches (prune only)
   --help               Show this help
 
 Examples:
@@ -46,6 +51,10 @@ Examples:
   gitmanager pr view 12 -r tu
   gitmanager pr create -r tu --base=master --title="Fix bug"
   gitmanager pr merge 12 -r tu --dry-run
+  gitmanager prune-branches -r tu --base=master --dry-run
+  gitmanager prune-branches -r tu --base=master --delete
+  gitmanager release check -r gm
+  gitmanager release tag -r gm --dry-run
 HELP
 
 sub print-report(%report, Bool :$verbose = False --> Nil) {
@@ -95,6 +104,7 @@ sub run-cli(@arguments --> Int) is export {
     my $yes = False;
     my $no-interactive = False;
     my $push = False;
+    my $delete = False;
     my $title = '';
     my $body = '';
     my $base = '';
@@ -112,6 +122,7 @@ sub run-cli(@arguments --> Int) is export {
             when '--yes'            { $yes = True }
             when '--no-interactive' { $no-interactive = True }
             when '--push'           { $push = True }
+            when '--delete'         { $delete = True }
             when '-r' {
                 unless @args {
                     note 'Missing value for -r';
@@ -181,6 +192,10 @@ sub run-cli(@arguments --> Int) is export {
         return 0;
     }
     if $command eq 'alias' {
+        if $delete {
+            note '--delete is valid only for prune-branches';
+            return 2;
+        }
         if @positionals.elems == 0 {
             note 'Usage: gitmanager alias <add|list|show|remove> ...';
             return 2;
@@ -247,7 +262,138 @@ sub run-cli(@arguments --> Int) is export {
         }
         return 0;
     }
+    if $command eq 'prune-branches' {
+        if @positionals or $all or $push or $title.chars or $body.chars or
+                $merge-method ne 'merge' or $remote ne 'origin' {
+            note 'Invalid options for prune-branches';
+            return 2;
+        }
+        my %plan;
+        try {
+            $repo = resolve-repo($repo);
+            %plan = prune-plan($repo, :$base);
+            CATCH {
+                default {
+                    note "Prune refused: {.message}";
+                    return 1;
+                }
+            }
+        }
+        if $delete and not $dry-run and %plan<count> > 0 and not $yes {
+            if $no-interactive or not $*IN.t {
+                note 'Branch deletion requires confirmation or --yes';
+                return 2;
+            }
+            say "Repository: {%plan<path>}";
+            say "Base: {%plan<base>}";
+            say 'Branches to delete: ' ~ %plan<candidates>.join(', ');
+            print 'Delete these local branches? [y/N] ';
+            my $answer = $*IN.get;
+            unless $answer.defined and $answer.lc.trim eq 'y' {
+                note 'Branch deletion cancelled';
+                return 1;
+            }
+        }
+        my %result = %plan;
+        if $delete and not $dry-run and %plan<count> > 0 {
+            try {
+                %result = prune-branches($repo, :$base, :$delete);
+                CATCH {
+                    default {
+                        note "Prune failed: {.message}";
+                        return 1;
+                    }
+                }
+            }
+        }
+        if $json {
+            say to-json(%result);
+        }
+        else {
+            say "Repository: {%result<path>}";
+            say "Merge base: {%result<base>}";
+            say "Eligible local branches: {%result<count>}";
+            for %result<candidates>.list -> $branch {
+                say "  $branch";
+            }
+            if $delete and $dry-run {
+                say 'Dry run: no branches deleted.';
+            }
+            elsif $delete {
+                say 'Deleted: ' ~ %result<deleted>.elems;
+            }
+            else {
+                say 'Inspection only; use --delete to remove eligible branches.';
+            }
+        }
+        return 0;
+    }
+    if $command eq 'release' {
+        if @positionals.elems != 1 or $all or $push or $delete or
+                $title.chars or $body.chars or $base.chars or
+                $merge-method ne 'merge' {
+            note 'Usage: gitmanager release <check|tag|push-tag|github> [options]';
+            return 2;
+        }
+        my $action = @positionals[0];
+        unless $action eq 'check' or $action eq 'tag' or
+                $action eq 'push-tag' or $action eq 'github' {
+            note "Unknown release action: $action";
+            return 2;
+        }
+        my $mutating = $action ne 'check';
+        my %preview;
+        try {
+            $repo = resolve-repo($repo);
+            %preview = release-action($repo, $action, :$remote, :dry-run);
+            CATCH {
+                default {
+                    note "Release refused: {.message}";
+                    return 1;
+                }
+            }
+        }
+        if $mutating and not $dry-run and not $yes {
+            if $no-interactive or not $*IN.t {
+                note 'Release modification requires confirmation or --yes';
+                return 2;
+            }
+            say "Repository: {%preview<path>}";
+            say "Action: $action   Tag: {%preview<tag>}";
+            print 'Proceed? [y/N] ';
+            my $answer = $*IN.get;
+            unless $answer.defined and $answer.lc.trim eq 'y' {
+                note 'Release cancelled';
+                return 1;
+            }
+        }
+        my %result = %preview;
+        unless $dry-run or $action eq 'check' {
+            try {
+                %result = release-action($repo, $action, :$remote);
+                CATCH {
+                    default {
+                        note "Release failed: {.message}";
+                        return 1;
+                    }
+                }
+            }
+        }
+        if $json {
+            say to-json(%result);
+        }
+        else {
+            say "Repository: {%result<path>}";
+            say "Version: {%result<version>}  Tag: {%result<tag>}";
+            say %result<message>;
+        }
+        return 0;
+    }
     if $command eq 'pr' {
+        if $delete {
+            note '--delete is valid only for prune-branches';
+            return 2;
+        }
         if $all or $push {
             note '--all and --push are not supported for pr';
             return 2;
@@ -344,6 +490,10 @@ sub run-cli(@arguments --> Int) is export {
     }
     if @positionals {
         note "Unexpected arguments: {@positionals.join(' ')}";
+        return 2;
+    }
+    if $delete {
+        note '--delete is valid only for prune-branches';
         return 2;
     }
     unless $command eq 'status' or $command eq 'sync' {

@@ -19,6 +19,8 @@
     "App::GitManager::CLI": "lib/App/GitManager/CLI.rakumod",
     "App::GitManager::Git": "lib/App/GitManager/Git.rakumod",
     "App::GitManager::PR": "lib/App/GitManager/PR.rakumod",
+    "App::GitManager::PruneBranches": "lib/App/GitManager/PruneBranches.rakumod",
+    "App::GitManager::Release": "lib/App/GitManager/Release.rakumod",
     "App::GitManager::Result": "lib/App/GitManager/Result.rakumod",
     "App::GitManager::Status": "lib/App/GitManager/Status.rakumod",
     "App::GitManager::Sync": "lib/App/GitManager/Sync.rakumod"
